@@ -20,13 +20,25 @@ export async function handleImportUrl(url: string) {
   urlObject.searchParams.set("page", "1");
 
   logger.info(`Importing data from ${urlObject.toString()}`);
-  const page = await loadPage(urlObject.toString(), process.env.LAST_PAGE_SELECTOR);
-
-  const lastPage = await page.evaluate((selector) => {
-    return parseInt([...document.querySelectorAll(selector)].at(-1).textContent);
-  }, process.env.LAST_PAGE_SELECTOR);
+  const lastPage = await findLastPage(url.toString());
   logger.info(`Found ${lastPage} pages, starting import...`);
 
+  const urls = await findUrlsFromSearchPages(urlObject, lastPage);
+
+  const inDatabase = await prisma.details.findMany({select: {url: true}});
+
+  const newUrls = Array.from(urls).filter((url) => inDatabase.every((dbUrl) => dbUrl.url !== url));
+  logger.info(`Found ${urls.size} distinct urls, ${newUrls.length} are new`);
+
+  for await (const details of readDatailPages(newUrls)) {
+    if (details === undefined) continue;
+
+    await prisma.details.create({data: details});
+    logger.info(`Saved details from ${details.url} - ${details.title}`);
+  }
+}
+
+async function findUrlsFromSearchPages(urlObject: URL, lastPage: number) {
   const urls = new Set<string>();
 
   for (let i = 1; i <= lastPage; i++) {
@@ -43,24 +55,24 @@ export async function handleImportUrl(url: string) {
       pageUrls.map(validateAndFixURL).filter(url => url !== undefined).forEach((url: string) => urls.add(url));
     } catch (e) {
       logger.error(`Failed to import page ${i}, retrying...`, e);
-      i--;
       if (tries > 5) {
         logger.error(`Failed to import page ${i} 5 times, skipping to next page`);
       }
+      i--;
     }
   }
 
-  const inDatabase = await prisma.details.findMany({select: {url: true}});
+  return urls
+}
 
-  const newUrls = Array.from(urls).filter((url) => inDatabase.every((dbUrl) => dbUrl.url !== url));
-  logger.info(`Found ${urls.size} distinct urls, ${newUrls.length} are new`);
+async function findLastPage(url: string) {
+  const page = await loadPage(url, process.env.LAST_PAGE_SELECTOR);
 
-  for await (const details of readDatailsPages(newUrls)) {
-    if (details === undefined) continue;
+  if(1) return 2
 
-    await prisma.details.create({data: details});
-    logger.info(`Saved details from ${details.url} - ${details.title}`);
-  }
+  return await page.evaluate((selector) => {
+    return parseInt([...document.querySelectorAll(selector)].at(-1).textContent);
+  }, process.env.LAST_PAGE_SELECTOR);
 }
 
 function validateAndFixURL(url: string): string | undefined {
@@ -83,7 +95,7 @@ async function readSearchPage(page: Page): Promise<string[]> {
   }, process.env.SEARCH_URL_SELECTOR);
 }
 
-async function* readDatailsPages(urls: string[]) {
+async function* readDatailPages(urls: string[]) {
   let i = 0
   for (let url of urls) {
     i++;
@@ -95,13 +107,9 @@ async function* readDatailsPages(urls: string[]) {
 
 async function handleSingleDetailsPage(url: string): Promise<DetailsType | undefined> {
   // I will handle this in the future
-  if (!url.startsWith("https://www.olx.pl"))
+  if (!url.startsWith("https://www.olx.pl")) {
+    logger.warn(`Skipping url ${url}, not from olx.pl`)
     return undefined
-
-  try {
-    new URL(url);
-  } catch (e) {
-    url = `https://www.olx.pl${url}`;
   }
 
   let tries = 5;
