@@ -13,19 +13,13 @@ datasource db {
   url      = "file:./dev.db"
 }
 
-model urls {
-  id String @id @default(cuid())
-  url String
-}
-
 model details {
-  id String @id @default(cuid())
-  url String
+  id Int @id @default(autoincrement())
+  url String @unique
   title String
   description String
   rent Int
   price Int
   images String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  loaded Boolean @default(false)
 }

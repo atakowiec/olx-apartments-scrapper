@@ -29,8 +29,8 @@ const fileFormat = (label: string = "main") => format.combine(
 const loggerFactory = (label: string = "main") => winston.createLogger({
   level: "debug",
   transports: [
-    new transports.Console({format: consoleFormat(label)}),
-    new transports.File({filename: "logs/latest.log", format: fileFormat(label)})
+    new transports.Console({format: consoleFormat(label.toUpperCase())}),
+    new transports.File({filename: "logs/latest.log", format: fileFormat(label.toUpperCase())})
   ]
 })
 

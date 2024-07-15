@@ -16,34 +16,35 @@ export default function Page() {
 
     const url = urlRef.current?.value
 
-    const res = await axios.post('/api/import', {url})
+    const res = await axios.post('/api/apartments/import', {url})
 
     console.log(res.data)
   }
 
   async function clearDatabase() {
-    await axios.delete('/apartments')
+    await axios.delete('/api/apartments')
   }
 
   return (
     <div className={"text-center mt-12"}>
       <h1>Wczytaj mieszkania</h1>
       <form className={"my-4"} onSubmit={onSubmit}>
-        <label htmlFor={"url"} className="block text-gray-700 text-sm font-bold mb-2">
+        <label htmlFor={"url"} className="block text-gray-200 text-sm font-bold mb-2">
           Podaj url do pierwszej strony z wynikami wyszukiwania mieszkań na olx.pl
         </label>
         <input
-          className="shadow appearance-none border border-red-500 rounded py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:shadow-outline mt-5"
+          className="shadow appearance-none border border-blue-500 bg-gray-500 rounded py-2 px-3 text-gray-200 leading-tight focus:outline-none focus:shadow-outline my-5"
           type="text"
           id="url"
           ref={urlRef}
+          defaultValue={"https://www.olx.pl/nieruchomosci/mieszkania/wynajem/lublin/"}
         />
         <br/>
         <Button>
           Wczytaj
         </Button>
       </form>
-      <h4 className={"mt-12"}>
+      <h4 className={"mt-12 mb-5"}>
         Opcje
       </h4>
       <Button onClick={clearDatabase}>
