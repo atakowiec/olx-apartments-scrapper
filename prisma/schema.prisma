@@ -22,4 +22,5 @@ model details {
   price Int
   images String
   loaded Boolean @default(false)
+  status String @default("pending") // pending, approved, rejected
 }

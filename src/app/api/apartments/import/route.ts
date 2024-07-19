@@ -1,7 +1,6 @@
 import {NextResponse} from "next/server";
 import {handleImportUrl} from "@/services/apartmentsService.ts";
 import loggerFactory from "@/util/winstonLogger.ts";
-import prisma from "@/util/prisma.ts";
 
 const logger = loggerFactory("IMPORT");
 

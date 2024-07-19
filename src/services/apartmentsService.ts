@@ -5,7 +5,7 @@ import prisma from "@/util/prisma.ts";
 
 const logger = loggerFactory("import");
 
-type DetailsType = {
+export type DetailsType = {
   rent: number;
   price: number;
   title: string;
@@ -68,8 +68,6 @@ async function findUrlsFromSearchPages(urlObject: URL, lastPage: number) {
 async function findLastPage(url: string) {
   const page = await loadPage(url, process.env.LAST_PAGE_SELECTOR);
 
-  if(1) return 2
-
   return await page.evaluate((selector) => {
     return parseInt([...document.querySelectorAll(selector)].at(-1).textContent);
   }, process.env.LAST_PAGE_SELECTOR);
@@ -109,7 +107,15 @@ async function handleSingleDetailsPage(url: string): Promise<DetailsType | undef
   // I will handle this in the future
   if (!url.startsWith("https://www.olx.pl")) {
     logger.warn(`Skipping url ${url}, not from olx.pl`)
-    return undefined
+    return {
+      url,
+      loaded: false,
+      description: "",
+      images: "",
+      price: 0,
+      rent: 0,
+      title: ""
+    }
   }
 
   let tries = 5;
