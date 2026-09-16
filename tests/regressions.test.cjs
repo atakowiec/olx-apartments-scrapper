@@ -605,6 +605,33 @@ test('middleware protects pages and APIs while allowing login; protected layout 
   assert.ok(await Layout({children: 'private'}));
 });
 
+test('login redirects use the public proxy host and scheme, without leaking the internal port', async () => {
+  const {middleware} = load('src/middleware.ts');
+  const {NextRequest} = require('next/server');
+  for (const [internal, headers, expected] of [
+    ['https://localhost:3000/?next=https://evil.test', {
+      host: 'pianka.cieszczyk.pl', 'x-forwarded-proto': 'https', 'x-forwarded-host': 'evil.test'
+    }, 'https://pianka.cieszczyk.pl/login'],
+    ['http://127.0.0.1:3000/apartments', {
+      host: 'pianka.cieszczyk.pl', 'x-forwarded-proto': 'https'
+    }, 'https://pianka.cieszczyk.pl/login'],
+    ['http://localhost:3000/stats', {
+      host: '127.0.0.1:3111', 'x-forwarded-proto': 'http'
+    }, 'http://127.0.0.1:3111/login'],
+    ['http://localhost:3000/users', {}, 'http://localhost:3000/login'],
+  ]) {
+    const response = await middleware(new NextRequest(internal, {headers}));
+    assert.equal(response.status, 307);
+    assert.equal(response.headers.get('location'), expected);
+    assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  }
+  const headers = {host: 'pianka.cieszczyk.pl', 'x-forwarded-proto': 'https'};
+  assert.equal((await middleware(new NextRequest('https://localhost:3000/login', {headers}))).headers.get('location'), null);
+  const api = await middleware(new NextRequest('https://localhost:3000/api/apartments', {headers}));
+  assert.equal(api.status, 401);
+  assert.equal(api.headers.get('location'), null);
+});
+
 test('origin checks use the browser-facing Host when Next uses an internal URL', () => {
   const {sameOrigin} = load('src/util/requireAdmin.ts');
   assert.equal(sameOrigin(new Request('http://localhost:3111/api', {headers: {
