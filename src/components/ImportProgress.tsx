@@ -1,4 +1,5 @@
 import type {ImportJob} from "@/types/importProgress.ts";
+import Link from "next/link";
 import {ArrowRightIcon, CheckIcon, CircleStackIcon, ExclamationTriangleIcon, MagnifyingGlassIcon, PhotoIcon} from "@heroicons/react/24/outline";
 
 export default function ImportProgress({job}: {job: ImportJob | null}) {
@@ -53,6 +54,6 @@ export default function ImportProgress({job}: {job: ImportJob | null}) {
     {job.error && <p role="alert" className="mt-5 rounded-xl border border-rose-300/20 bg-rose-400/10 p-4 text-sm text-rose-300">{job.error}</p>}
     </div>
     {job.status === "completed" && job.saved > 0 &&
-      <div className="flex flex-wrap items-center justify-between gap-4 border-t border-gray-700 bg-gray-900/20 px-5 py-4 sm:px-7"><p className="text-sm text-gray-300">Nowe oferty czekają na Twoją decyzję.</p><a href="/" className="inline-flex items-center gap-2 rounded-xl bg-emerald-400 px-4 py-2.5 text-sm font-semibold text-gray-950 transition hover:bg-emerald-300">Przejrzyj mieszkania<ArrowRightIcon className="h-4 w-4" aria-hidden="true"/></a></div>}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-t border-gray-700 bg-gray-900/20 px-5 py-4 sm:px-7"><p className="text-sm text-gray-300">Nowe oferty czekają na Twoją decyzję.</p><Link href="/" className="inline-flex items-center gap-2 rounded-xl bg-emerald-400 px-4 py-2.5 text-sm font-semibold text-gray-950 transition hover:bg-emerald-300">Przejrzyj mieszkania<ArrowRightIcon className="h-4 w-4" aria-hidden="true"/></Link></div>}
   </section>;
 }
