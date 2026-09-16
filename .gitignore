@@ -18,15 +18,24 @@
 
 # misc
 .DS_Store
+Thumbs.db
 *.pem
+*.key
+*.p12
+*.pfx
 
 # debug
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# local env files
-.env*.local
+# Credentials and local environment overrides (keep safe templates in Git)
+.env
+.env.*
+!.env.example
+!.env.sample
+!example.env
 
 # vercel
 .vercel
@@ -39,8 +48,18 @@ next-env.d.ts
 .idea
 
 # My app
-logs
-.env
+/logs/
+/.cache/
+/backups/
 
-# Prisma
-/prisma
+# Local databases and SQLite journals/backups; schema and migrations stay tracked
+*.db
+*.db-*
+*.db.bak
+*.sqlite
+*.sqlite-*
+*.sqlite.bak
+*.sqlite3
+*.sqlite3-*
+*.sqlite3.bak
+/prisma/backups/

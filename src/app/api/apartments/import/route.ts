@@ -1,15 +1,28 @@
 import {NextResponse} from "next/server";
-import {handleImportUrl} from "@/services/apartmentsService.ts";
-import loggerFactory from "@/util/winstonLogger.ts";
+import {getImportJob, startImport} from "@/services/importJobs.ts";
+import {parseImportUrl} from "@/util/importUrl.ts";
+import {requireAdmin} from "@/util/requireAdmin.ts";
 
-const logger = loggerFactory("IMPORT");
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+export async function GET(request: Request) {
+  const denied = await requireAdmin(request);
+  if (denied) return denied;
+  return NextResponse.json({job: getImportJob()}, {headers: {"Cache-Control": "no-store"}});
+}
 
 export async function POST(req: Request) {
-  const {url} = await req.json();
+  const denied = await requireAdmin(req);
+  if (denied) return denied;
+  let url: string;
+  try {
+    const body = await req.json();
+    url = parseImportUrl(body?.url).toString();
+  } catch {
+    return NextResponse.json({error: "Provide a valid HTTPS OLX apartment search URL"}, {status: 400});
+  }
 
-  // yeah, I want to do it async
-  handleImportUrl(url)
-    .then(() => logger.info(`Imported data from ${url}`))
-
-  return NextResponse.json({status: "ok"})
+  const {started, job} = startImport(url);
+  return NextResponse.json({job}, {status: started ? 202 : 409});
 }

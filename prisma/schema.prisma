@@ -18,9 +18,41 @@ model details {
   url String @unique
   title String
   description String
-  rent Int
-  price Int
+  rent Int?
+  price Int?
+  source String @default("olx")
   images String
   loaded Boolean @default(false)
-  status String @default("pending") // pending, approved, rejected
+  status String @default("pending") // pending, accepted, maybe, rejected
+  surfaceArea Float?
+  statusSetById String?
+  statusSetAt DateTime?
+  statusSetBy User? @relation(fields: [statusSetById], references: [id], onDelete: SetNull)
+  statusChanges StatusChange[]
+}
+
+model User {
+  id String @id @default(cuid())
+  username String @unique
+  passwordHash String?
+  role String @default("user")
+  createdAt DateTime @default(now())
+  apartments details[]
+  statusChanges StatusChange[]
+}
+
+model StatusChange {
+  id Int @id @default(autoincrement())
+  apartmentId Int?
+  apartment details? @relation(fields: [apartmentId], references: [id], onDelete: SetNull)
+  apartmentTitle String
+  apartmentUrl String
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  fromStatus String
+  toStatus String
+  createdAt DateTime @default(now())
+
+  @@index([userId, toStatus])
+  @@index([createdAt])
 }

@@ -1,20 +1,24 @@
 "use client"
 
-import { Disclosure, DisclosureButton, DisclosurePanel, Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react'
-import { Bars3Icon, BellIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { Disclosure, DisclosureButton, DisclosurePanel } from '@headlessui/react'
+import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline'
 import {usePathname} from "next/navigation";
 
-const navigation = [
+const baseNavigation = [
   { name: 'Przeglądaj mieszkania', href: '/' },
-  { name: 'Dodaj mieszkania', href: '/import' }
+  { name: 'Zapisane mieszkania', href: '/apartments' },
+  { name: 'Statystyki', href: '/stats' }
 ]
 
 function classNames(...classes: string[]) {
   return classes.filter(Boolean).join(' ')
 }
 
-export default function Example() {
+export default function MainNavbar({user}: {user: {username: string; role: string}}) {
   const currentPath = usePathname()
+  const navigation = [...baseNavigation, ...(user.role === "admin" ? [
+    {name: "Dodaj mieszkania", href: "/import"}, {name: "Użytkownicy", href: "/users"}
+  ] : [])];
 
   return (
     <Disclosure as="nav" className="bg-gray-800">
@@ -48,6 +52,10 @@ export default function Example() {
               </div>
             </div>
           </div>
+          <form action="/api/auth/logout" method="post" className="flex items-center gap-2">
+            <span className="max-w-28 truncate text-sm text-gray-300" title={user.username}>{user.username}</span>
+            <button className="rounded px-3 py-2 text-sm hover:bg-gray-700">Wyloguj się</button>
+          </form>
         </div>
       </div>
 

@@ -1,26 +1,9 @@
-import {Axios} from "axios";
+import axios from "axios";
 
-const axiosInstance = new Axios({
-  baseURL: "http://localhost:3000",
-  headers: {
-    "Content-Type": "application/json"
-  }
+// Relative API URLs use the host serving the app in development and production.
+const client = axios.create();
+client.interceptors.response.use(response => response, error => {
+  if (error.response?.status === 401 && typeof window !== "undefined") window.location.assign("/login");
+  return Promise.reject(error);
 });
-
-// interceptor to convert data to JSON before sending
-axiosInstance.interceptors.request.use(config => {
-  if (config.data && config.headers['Content-Type'] === 'application/json') {
-    config.data = JSON.stringify(config.data);
-  }
-  return config;
-});
-
-// interceptor to convert data to JSON after receiving
-axiosInstance.interceptors.response.use(response => {
-  if (response.headers['content-type'] === 'application/json') {
-    response.data = JSON.parse(response.data);
-  }
-  return response;
-});
-
-export default axiosInstance
+export default client;

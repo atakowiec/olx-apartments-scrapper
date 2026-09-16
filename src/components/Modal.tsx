@@ -31,7 +31,7 @@ export default function Modal(props: ModalProps) {
   }
 
   return (
-    <div id="default-modal" tabIndex="-1" aria-hidden="true"
+    <div id="default-modal" tabIndex={-1} aria-hidden={!props.visible}
          onClick={onBackdropClick}
          className={`${props.visible ? "visible" : "hidden"} overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-[calc(100%-1rem)] max-h-full bg-opacity-70 bg-black`}>
       <div className="relative p-4 w-full max-w-2xl max-h-full mx-auto mt-48">

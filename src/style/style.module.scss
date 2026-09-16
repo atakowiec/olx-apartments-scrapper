@@ -32,6 +32,8 @@
   justify-content: center;
   align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
+  padding-bottom: max(.5rem, env(safe-area-inset-bottom));
 
   button, a {
     padding: 0.5rem 1rem;
@@ -39,6 +41,10 @@
     border-radius: 5px;
     transition: 0.3s;
     text-decoration: none;
+  }
+
+  @media (max-width: 400px) {
+    button, a { padding: .5rem .65rem; font-size: .85rem; }
   }
 }
 

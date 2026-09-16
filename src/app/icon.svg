@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Wyszukiwarka mieszkań</title>
+  <rect width="64" height="64" rx="16" fill="#101c2c"/>
+  <path d="M12 29 30 13a3 3 0 0 1 4 0l18 16v20a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4Z" fill="#5eeac1"/>
+  <circle cx="30" cy="34" r="10" fill="#101c2c"/>
+  <path d="m37 41 9 9" stroke="#101c2c" stroke-width="7" stroke-linecap="round"/>
+  <path d="M27 34h6m-3-3v6" stroke="#5eeac1" stroke-width="3" stroke-linecap="round"/>
+</svg>

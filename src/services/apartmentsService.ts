@@ -2,64 +2,97 @@ import {loadPage} from "@/util/puppeteer.ts";
 import loggerFactory from "@/util/winstonLogger.ts";
 import {Page} from "puppeteer";
 import prisma from "@/util/prisma.ts";
+import {parseImportUrl, parseOlxUrl, parseListingUrl} from "@/util/importUrl.ts";
+import {readSearchCards, searchCardPrice, type SearchCard} from "@/util/searchCards.ts";
+import {initialImportProgress, type ImportProgress} from "@/types/importProgress.ts";
+import {extractSurfaceArea} from "@/types/apartment.ts";
 
 const logger = loggerFactory("import");
 
 export type DetailsType = {
-  rent: number;
-  price: number;
+  rent: number | null;
+  price: number | null;
+  source?: string;
   title: string;
   description: string;
   images: string;
   url: string;
   loaded: boolean;
+  surfaceArea?: number | null;
 }
 
-export async function handleImportUrl(url: string) {
-  const urlObject = new URL(url);
+export async function handleImportUrl(url: string, onProgress: (progress: ImportProgress) => void = () => {}) {
+  const progress = {...initialImportProgress};
+  const report = (update: Partial<ImportProgress>) => {
+    Object.assign(progress, update);
+    onProgress({...progress});
+  };
+  report({phase: "discovery"});
+  const urlObject = parseImportUrl(url);
   urlObject.searchParams.set("page", "1");
 
   logger.info(`Importing data from ${urlObject.toString()}`);
-  const lastPage = await findLastPage(url.toString());
+  const lastPage = await findLastPage(urlObject.toString());
   logger.info(`Found ${lastPage} pages, starting import...`);
+  report({phase: "search", pagesTotal: lastPage});
 
-  const urls = await findUrlsFromSearchPages(urlObject, lastPage);
+  const urls = await findUrlsFromSearchPages(urlObject, lastPage, report);
 
   const inDatabase = await prisma.details.findMany({select: {url: true}});
 
-  const newUrls = Array.from(urls).filter((url) => inDatabase.every((dbUrl) => dbUrl.url !== url));
+  const newUrls = Array.from(urls.keys()).filter((url) => inDatabase.every((dbUrl) => dbUrl.url !== url));
   logger.info(`Found ${urls.size} distinct urls, ${newUrls.length} are new`);
+  report({phase: "details", apartmentsTotal: newUrls.length, existing: urls.size - newUrls.length, attempt: 0});
 
-  for await (const details of readDatailPages(newUrls)) {
-    if (details === undefined) continue;
-
-    await prisma.details.create({data: details});
-    logger.info(`Saved details from ${details.url} - ${details.title}`);
+  for (const url of newUrls) {
+    const card = urls.get(url)!;
+    const details = parseListingUrl(url).source === "otodom" ? {
+      url, source: "otodom", title: card.title || "Ogłoszenie Otodom", description: card.description,
+      images: card.images, price: searchCardPrice(card.priceText), rent: null,
+      surfaceArea: extractSurfaceArea(card.surfaceText), loaded: false,
+    } : await handleSingleDetailsPage(url, attempt => report({attempt}));
+    if (details === undefined) {
+      report({apartmentsFailed: progress.apartmentsFailed + 1});
+    } else {
+      await prisma.details.create({data: details});
+      report({saved: progress.saved + 1});
+      logger.info(`Saved details from ${details.url} - ${details.title}`);
+    }
+    report({apartmentsProcessed: progress.apartmentsProcessed + 1, attempt: 0});
   }
 }
 
-async function findUrlsFromSearchPages(urlObject: URL, lastPage: number) {
-  const urls = new Set<string>();
+async function findUrlsFromSearchPages(urlObject: URL, lastPage: number, report: (update: Partial<ImportProgress>) => void) {
+  const urls = new Map<string, SearchCard>();
+  let pagesFailed = 0;
 
   for (let i = 1; i <= lastPage; i++) {
-    let tries = 0;
-    tries++;
-    try {
-      logger.info(`Importing page ${i} (${urlObject.toString()})`);
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      report({attempt});
+      try {
+        urlObject.searchParams.set("page", i.toString());
+        logger.info(`Importing page ${i} (${urlObject.toString()})`);
 
-      urlObject.searchParams.set("page", i.toString());
-      const page = await loadPage(urlObject.toString(), process.env.SEARCH_URL_SELECTOR);
-      const pageUrls = await readSearchPage(page);
-      logger.info(`Found ${pageUrls.length} urls on page ${i}`);
+        const page = await loadPage(urlObject.toString(), `[data-testid="l-card"], ${requiredSelector("SEARCH_URL_SELECTOR")}`);
+        const pageUrls = await readSearchPage(page);
+        logger.info(`Found ${pageUrls.length} urls on page ${i}`);
 
-      pageUrls.map(validateAndFixURL).filter(url => url !== undefined).forEach((url: string) => urls.add(url));
-    } catch (e) {
-      logger.error(`Failed to import page ${i}, retrying...`, e);
-      if (tries > 5) {
-        logger.error(`Failed to import page ${i} 5 times, skipping to next page`);
+        for (const card of pageUrls) {
+          try {
+            const {url} = parseListingUrl(card.url);
+            if (!urls.has(url)) urls.set(url, card);
+          } catch { /* Ignore unsupported destinations. */ }
+        }
+        break;
+      } catch (e) {
+        logger.error(`Failed to import page ${i}, attempt ${attempt}/5`, e);
+        if (attempt === 5) {
+          pagesFailed++;
+          logger.error(`Skipping page ${i} after 5 failed attempts`);
+        }
       }
-      i--;
     }
+    report({pagesProcessed: i, pagesFailed, urlsFound: urls.size, attempt: 0});
   }
 
   return urls
@@ -69,57 +102,32 @@ async function findLastPage(url: string) {
   const page = await loadPage(url, process.env.LAST_PAGE_SELECTOR);
 
   return await page.evaluate((selector) => {
-    return parseInt([...document.querySelectorAll(selector)].at(-1).textContent);
-  }, process.env.LAST_PAGE_SELECTOR);
+    const lastPage = parseInt([...document.querySelectorAll(selector)].at(-1)?.textContent ?? "1");
+    return Number.isFinite(lastPage) && lastPage > 0 ? lastPage : 1;
+  }, requiredSelector("LAST_PAGE_SELECTOR"));
 }
 
 function validateAndFixURL(url: string): string | undefined {
   try {
-    new URL(url);
-    return url;
-  } catch (e) {
-    try {
-      new URL(`https://www.olx.pl${url}`);
-      return `https://www.olx.pl${url}`;
-    } catch (e) {
-      return undefined;
-    }
+    return parseOlxUrl(new URL(url, "https://www.olx.pl").toString()).toString();
+  } catch {
+    return undefined;
   }
 }
 
-async function readSearchPage(page: Page): Promise<string[]> {
-  return await page.evaluate((selector) => {
-    return [...document.querySelectorAll(selector)].map((el) => el.getAttribute("href"));
-  }, process.env.SEARCH_URL_SELECTOR);
+async function readSearchPage(page: Page): Promise<SearchCard[]> {
+  return await page.evaluate(readSearchCards, requiredSelector("SEARCH_URL_SELECTOR"));
 }
 
-async function* readDatailPages(urls: string[]) {
-  let i = 0
-  for (let url of urls) {
-    i++;
-    logger.info(`[${i}/${urls.length}] Importing details from ${url}`);
-
-    yield await handleSingleDetailsPage(url);
-  }
-}
-
-async function handleSingleDetailsPage(url: string): Promise<DetailsType | undefined> {
-  // I will handle this in the future
-  if (!url.startsWith("https://www.olx.pl")) {
+async function handleSingleDetailsPage(url: string, onAttempt: (attempt: number) => void): Promise<DetailsType | undefined> {
+  if (!validateAndFixURL(url)) {
     logger.warn(`Skipping url ${url}, not from olx.pl`)
-    return {
-      url,
-      loaded: false,
-      description: "",
-      images: "",
-      price: 0,
-      rent: 0,
-      title: ""
-    }
+    return undefined;
   }
 
   let tries = 5;
   while (tries-- > 0) {
+    onAttempt(5 - tries);
     try {
       return await readSingleDetailsPage(url);
     } catch (e) {
@@ -135,30 +143,41 @@ async function handleSingleDetailsPage(url: string): Promise<DetailsType | undef
 }
 
 async function readSingleDetailsPage(url: string): Promise<DetailsType> {
-  const page = await loadPage(url, "div.css-1dp6pbg");
+  const page = await loadPage(url, requiredSelector("APARTMENT_PRICE_SELECTOR"));
 
-  const result = await page.evaluate<string[]>((descriptionSelector, imagesSelector, priceSelector, titleSelector, rentSelector) => {
-      const description = document.querySelector(descriptionSelector)?.textContent.replace("<br>", "\n");
+  const result = await page.evaluate((descriptionSelector, imagesSelector, priceSelector, titleSelector, rentSelector) => {
+      const description = document.querySelector(descriptionSelector)?.textContent?.replace("<br>", "\n") ?? "";
       const images = [...document.querySelectorAll(imagesSelector)].map((el) => el.getAttribute("src")).join("\n");
-      const title = document.querySelector(titleSelector)?.textContent.replace(" • OLX.pl", "").trim();
+      const title = document.querySelector(titleSelector)?.textContent?.replace(" • OLX.pl", "").trim() ?? "";
 
       const priceText = document.querySelector(priceSelector)?.textContent;
-      const price = parseFloat(priceText.replace(" zł", "").replace(" ", "").replace(",", "."))
+      const price = parseFloat((priceText ?? "").replace(" zł", "").replace(/\s/g, "").replace(",", "."));
+      if (!Number.isFinite(price)) throw new Error("Missing or invalid apartment price");
 
-      const rentText = [...document.querySelectorAll(rentSelector)].find((el) => el.textContent.includes("Czynsz (dodatkowo):"))?.textContent.slice(20, -3) ?? "";
+      const rentText = [...document.querySelectorAll(rentSelector)].find((el) => el.textContent?.includes("Czynsz (dodatkowo):"))?.textContent?.slice(20, -3) ?? "";
       const rent = rentText.length > 1 ? parseFloat(rentText) : 0;
 
-      return {description, images, price, title, rent};
+      const surfaceText = [...document.querySelectorAll(rentSelector)]
+        .map(el => el.textContent ?? "").find(text => /powierzchnia/i.test(text)) ?? "";
+      return {description, images, price, title, rent, surfaceText};
     },
-    process.env.APARTMENT_DESCRIPTION_SELECTOR,
-    process.env.APARTMENT_IMAGES_SELECTOR,
-    process.env.APARTMENT_PRICE_SELECTOR,
-    process.env.APARTMENT_TITLE_SELECTOR,
-    process.env.APARTMENT_RENT_SELECTOR);
+    requiredSelector("APARTMENT_DESCRIPTION_SELECTOR"),
+    requiredSelector("APARTMENT_IMAGES_SELECTOR"),
+    requiredSelector("APARTMENT_PRICE_SELECTOR"),
+    requiredSelector("APARTMENT_TITLE_SELECTOR"),
+    requiredSelector("APARTMENT_RENT_SELECTOR"));
 
+  const {surfaceText, ...details} = result;
   return {
-    ...result,
+    ...details,
+    surfaceArea: extractSurfaceArea(surfaceText || `${result.title}\n${result.description}`),
     url,
     loaded: !!result.title
   } as DetailsType;
+}
+
+function requiredSelector(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing selector configuration: ${name}`);
+  return value;
 }

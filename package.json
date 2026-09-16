@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint .",
+    "test": "node --test tests/*.test.cjs",
+    "db:setup": "node scripts/prepare-db.cjs && prisma generate && prisma migrate deploy"
   },
   "dependencies": {
     "@headlessui/react": "^2.1.2",
@@ -15,21 +17,27 @@
     "ansis": "^3.3.0",
     "axios": "^1.7.2",
     "fs": "^0.0.1-security",
-    "next": "14.2.5",
+    "next": "15.5.24",
     "puppeteer": "^22.13.0",
-    "react": "^18",
-    "react-dom": "^18",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
     "sass": "^1.77.8",
     "winston": "^3.13.1"
   },
   "devDependencies": {
     "@types/node": "^20",
-    "@types/react": "^18",
-    "@types/react-dom": "^18",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.39",
     "prisma": "^5.16.2",
     "tailwindcss": "^3.4.4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.24"
+  },
+  "overrides": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0"
   }
 }
