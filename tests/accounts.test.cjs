@@ -105,6 +105,53 @@ test('accounts, permissions, status audit and statistics work together in migrat
     await change(userCookie, 'rejected');
     const saved = (await (await apartments.GET(makeRequest('/api/apartments', 'GET', userCookie))).json()).find(row => row.id === apartment.id);
     assert.equal(saved.statusSetBy.username, 'alice');
+    const followup = load('src/app/api/apartments/[id]/followup/route.ts').PATCH;
+    const follow = (body, cookie = userCookie, origin = 'http://app', id = apartment.id) =>
+      followup(makeRequest(`/api/apartments/${id}/followup`, 'PATCH', cookie, body, origin), {params: Promise.resolve({id: String(id)})});
+    assert.equal((await follow({messageSent: true}, null)).status, 401);
+    assert.equal((await follow({messageSent: true}, userCookie, 'http://evil')).status, 403);
+    for (const body of [null, [], {}, {messageSent: 'true'}, {viewingScheduled: 1}, {notes: null},
+      {notes: 'x'.repeat(5001)}, {status: 'accepted'}, {notes: 'test', statusSetById: 'admin'}]) {
+      assert.equal((await follow(body)).status, 400);
+    }
+    assert.equal((await follow({notes: ''}, userCookie, 'http://app', 'bad')).status, 400);
+    assert.equal((await follow({notes: ''}, userCookie, 'http://app', 99999)).status, 404);
+    assert.equal((await follow({notes: 'Czwartek 18:00\nZapytać o parking'})).status, 200);
+    assert.equal((await follow({messageSent: true})).status, 200);
+    assert.equal((await follow({viewingScheduled: true})).status, 200);
+    let tracked = await database.details.findUnique({where: {id: apartment.id}});
+    assert.equal(tracked.notes, 'Czwartek 18:00\nZapytać o parking');
+    assert.equal(tracked.messageSent, true);
+    assert.equal(tracked.viewingScheduled, true);
+    assert.equal(tracked.statusSetById, alice.id);
+    assert.equal(tracked.status, 'rejected');
+    assert.equal(await database.statusChange.count(), 3);
+    await follow({viewingScheduled: false, notes: ''});
+    tracked = await database.details.findUnique({where: {id: apartment.id}});
+    assert.equal(tracked.viewingScheduled, false);
+    assert.equal(tracked.notes, '');
+    assert.equal(tracked.messageSent, true);
+
+    const scheduled = await database.details.create({data: {url: 'https://www.otodom.pl/pl/oferta/scheduled', source: 'otodom',
+      title: 'Scheduled', description: '', images: '', status: 'accepted', viewingScheduled: true}});
+    const messaged = await database.details.create({data: {url: 'https://www.olx.pl/messaged', title: 'Messaged',
+      description: '', images: '', status: 'accepted', messageSent: true}});
+    const ordinary = await database.details.create({data: {url: 'https://www.olx.pl/ordinary', title: 'Ordinary',
+      description: '', images: '', status: 'accepted'}});
+    const accepted = await (await apartments.GET(makeRequest('/api/apartments?status=accepted&source=all', 'GET', userCookie))).json();
+    assert.deepEqual(accepted.apartments.slice(0, 3).map(row => row.id), [scheduled.id, messaged.id, ordinary.id]);
+    assert.ok(accepted.apartments.every(row => row.status === 'accepted'));
+    assert.deepEqual(accepted.counts, {all: 5, accepted: 4, maybe: 0, rejected: 1});
+    const otodom = await (await apartments.GET(makeRequest('/api/apartments?status=accepted&source=otodom', 'GET', userCookie))).json();
+    assert.deepEqual(otodom.apartments.map(row => row.id), [scheduled.id]);
+    assert.equal(otodom.counts.all, 1);
+    const all = await (await apartments.GET(makeRequest('/api/apartments?status=all', 'GET', userCookie))).json();
+    assert.equal(all.apartments.length, 5);
+    assert.equal(all.apartments[0].id, scheduled.id);
+    for (const query of ['status=pending', 'status=bad', 'source=bad']) {
+      assert.equal((await apartments.GET(makeRequest(`/api/apartments?${query}`, 'GET', userCookie))).status, 400);
+    }
+    await database.details.deleteMany({where: {id: {in: [scheduled.id, messaged.id, ordinary.id]}}});
     let report = await stats();
     assert.equal(report.total, 3);
     assert.equal(report.unattributed, 1);

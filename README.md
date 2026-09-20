@@ -1,5 +1,15 @@
 # Apartments Crawler App
 
+The saved-apartments page opens on **Zaakceptowane** and fetches only the selected
+status/source. Counts for the other tabs come from database aggregates; expanded
+galleries render only when opened. Each saved card has independent **Wiadomość
+wysłana** and **Umówione na oglądanie** toggles, plus a shared note (up to 5000
+characters) with an explicit save button. Flags save immediately. Viewing appointments
+sort first, then messages sent, then other listings; newest entries appear first
+within the same flag combination. Changing flags or notes does not change review
+decisions or their attribution/history. Run `npm run db:setup` after updating to
+apply the follow-up migration and regenerate Prisma Client.
+
 This is a simple web crawler that automatically fetches all the apartments from search results on the olx website, stores them in a database and displays them in accesible way on a website.
 
 I am still working on this project, so it is not finished yet.

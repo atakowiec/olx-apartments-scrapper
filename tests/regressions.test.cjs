@@ -167,7 +167,7 @@ test('review API persists all three decisions, lists reviewed apartments and exc
     assert.equal(rows[index].status, status);
   }
   assert.equal((await next(new Request('http://app/api/apartments/random'))).status, 404);
-  const response = await list();
+  const response = await list(new Request('http://app/api/apartments'));
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal((await response.json()).length, 3);
   await PATCH(request('{"status":"maybe"}'), {params: {id: '1'}});

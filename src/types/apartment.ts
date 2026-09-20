@@ -19,9 +19,19 @@ export type Apartment = {
   loaded: boolean;
   surfaceArea: number | null;
   status: "pending" | ApartmentStatus;
+  messageSent: boolean;
+  viewingScheduled: boolean;
+  notes: string;
   statusSetBy?: {id: string; username: string} | null;
   statusSetAt?: string | null;
 };
+
+export type ApartmentFollowup = Pick<Apartment, "messageSent" | "viewingScheduled" | "notes">;
+
+export function compareApartmentFollowup(a: Apartment, b: Apartment): number {
+  return Number(b.viewingScheduled) - Number(a.viewingScheduled) ||
+    Number(b.messageSent) - Number(a.messageSent) || b.id - a.id;
+}
 
 export function isApartmentStatus(value: unknown): value is ApartmentStatus {
   return typeof value === "string" && apartmentStatuses.some(status => status === value);

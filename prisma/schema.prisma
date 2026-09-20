@@ -24,11 +24,16 @@ model details {
   images String
   loaded Boolean @default(false)
   status String @default("pending") // pending, accepted, maybe, rejected
+  messageSent Boolean @default(false)
+  viewingScheduled Boolean @default(false)
+  notes String @default("")
   surfaceArea Float?
   statusSetById String?
   statusSetAt DateTime?
   statusSetBy User? @relation(fields: [statusSetById], references: [id], onDelete: SetNull)
   statusChanges StatusChange[]
+
+  @@index([status, viewingScheduled, messageSent, id])
 }
 
 model User {
