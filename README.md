@@ -118,6 +118,16 @@ The import page polls progress every two seconds and restores the current/latest
 a page refresh. It shows discovery, search-page progress, apartment progress, retries,
 saved/existing counts, skipped failures, and the final result. Only one import can run at a
 time because the scraper shares a browser page; another request returns HTTP 409 with the
-active job. Progress is kept in memory on a single Node server and is lost on server restart.
+active job. Each progress snapshot and the final result are saved to the SQLite `ImportState`
+table. The final progress bar, counts, finish time and errors remain visible after completion,
+failure, page refresh and server restart, until a new import starts. If the process stops
+during an import, the next process marks the saved job as interrupted and keeps its last
+counts; importing again skips already saved apartments. This is still a single-process
+scraper, not a distributed job queue.
+
+The admin import screen shows exact API/network error messages and HTTP status/body,
+plus the latest scraper error with its URL and retry attempt, even when the import finishes
+with skipped listings. Error bodies are displayed as text. Apply the `20260921000000_import_state`
+migration with `npm run db:setup` before starting the updated server.
 
 Run `npm test` for regression checks and `npx tsc --noEmit` for TypeScript validation.

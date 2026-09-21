@@ -46,6 +46,21 @@ test('accounts, permissions, status audit and statistics work together in migrat
       for (const statement of sql.split(';').map(part => part.trim()).filter(Boolean)) await database.$executeRawUnsafe(statement);
     }
     const login = load('src/app/api/auth/login/route.ts').POST;
+    const importLoader = () => loader(database, env, {
+      '@/services/apartmentsService.ts': {handleImportUrl: async (url, report) => {
+        await report({phase: 'details', saved: 4, apartmentsTotal: 4, apartmentsProcessed: 4});
+      }}
+    })('src/services/importJobs.ts');
+    const durableJobs = importLoader();
+    await durableJobs.startImport('https://www.olx.pl/nieruchomosci/mieszkania/');
+    for (let attempt = 0; attempt < 100 && (await durableJobs.getImportJob()).status === 'running'; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    const restoredImport = await importLoader().getImportJob();
+    assert.equal(restoredImport.status, 'completed');
+    assert.equal(restoredImport.saved, 4);
+    assert.equal(restoredImport.apartmentsProcessed, 4);
+    assert.ok(restoredImport.finishedAt);
     const users = load('src/app/api/users/route.ts');
     const apartments = load('src/app/api/apartments/route.ts');
     const patch = load('src/app/api/apartments/[id]/route.ts').PATCH;

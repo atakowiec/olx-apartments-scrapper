@@ -22,7 +22,10 @@ export async function loadPage(url: string, waitForSelector: string | undefined)
     pagePromise = undefined;
     throw error;
   }));
-  await page.goto(url);
+  const response = await page.goto(url);
+  if (response && response.status() >= 400) {
+    throw new Error(`HTTP ${response.status()} ${response.statusText()} — ${response.url()}`);
+  }
 
   try {
     await page.waitForSelector(waitForSelector);

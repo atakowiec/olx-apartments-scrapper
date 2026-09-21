@@ -6,10 +6,12 @@ import {Dialog, DialogBackdrop, DialogPanel, DialogTitle} from "@headlessui/reac
 import {ArrowDownTrayIcon, ArrowRightIcon, CheckIcon, LinkIcon, MagnifyingGlassIcon, Squares2X2Icon, TrashIcon, XMarkIcon} from "@heroicons/react/24/outline";
 import ImportProgress from "@/components/ImportProgress.tsx";
 import type {ImportJob} from "@/types/importProgress.ts";
+import {requestErrorMessage} from "@/util/errorMessage.ts";
 
 export default function Page() {
   const [modalVisible, setModalVisible] = useState(false)
   const [message, setMessage] = useState("");
+  const [actionError, setActionError] = useState("");
   const urlRef = useRef<HTMLInputElement | null>(null)
   const [job, setJob] = useState<ImportJob | null>(null);
   const [starting, setStarting] = useState(false);
@@ -28,13 +30,14 @@ export default function Page() {
         if (submitting.current) return;
         const response = await axios.get<{job: ImportJob | null}>("/api/apartments/import", {signal: controller.signal});
         if (!controller.signal.aborted && requestRevision === revision.current) {
-          setJob(response.data.job);
+          // A transient empty response must not erase a result already shown.
+          if (response.data.job) setJob(response.data.job);
           setStatusReady(true);
           setProgressError("");
         }
-      } catch {
+      } catch (error) {
         if (!controller.signal.aborted && requestRevision === revision.current) {
-          setProgressError("Nie można odczytać postępu. Ponawiam połączenie…");
+          setProgressError(`Nie można odczytać postępu. Ponawiam połączenie…\n${requestErrorMessage(error)}`);
           setStatusReady(false);
         }
       } finally {
@@ -57,6 +60,7 @@ export default function Page() {
     revision.current++;
     setStarting(true);
     setMessage("");
+    setActionError("");
 
     try {
       const response = await axios.post<{job: ImportJob}>('/api/apartments/import', {url}, {
@@ -65,8 +69,8 @@ export default function Page() {
       setJob(response.data.job);
       setProgressError("");
       if (response.status === 409) setMessage("Import już trwa. Poniżej widzisz jego postęp.");
-    } catch {
-      setMessage("Nie udało się rozpocząć importu. Sprawdź adres wyszukiwania mieszkań OLX.");
+    } catch (error) {
+      setActionError(`Nie udało się rozpocząć importu.\n${requestErrorMessage(error)}`);
     } finally {
       submitting.current = false;
       setStarting(false);
@@ -74,11 +78,13 @@ export default function Page() {
   }
 
   async function clearDatabase() {
+    setMessage("");
+    setActionError("");
     try {
       await axios.delete('/api/apartments');
       setMessage("Baza danych została wyczyszczona.");
-    } catch {
-      setMessage("Nie udało się wyczyścić bazy. Spróbuj ponownie.");
+    } catch (error) {
+      setActionError(`Nie udało się wyczyścić bazy.\n${requestErrorMessage(error)}`);
     }
   }
 
@@ -119,6 +125,7 @@ export default function Page() {
                 </button>
               </form>
               {message && <p role="status" className="mt-5 rounded-xl border border-gray-600 bg-gray-700/50 p-4 text-sm leading-6 text-gray-200">{message}</p>}
+              {actionError && <p role="alert" className="mt-5 whitespace-pre-wrap break-words rounded-xl border border-rose-300/30 bg-rose-400/10 p-4 text-sm leading-6 text-rose-200">{actionError}</p>}
             </div>
             <aside className="border-t border-gray-700 bg-gray-900/25 p-6 sm:p-8 lg:border-l lg:border-t-0" aria-label="Jak dodać mieszkania">
               <p className="text-xs font-semibold uppercase tracking-widest text-gray-400">Od wyszukiwania do decyzji</p>
@@ -142,7 +149,7 @@ export default function Page() {
             <h2 id="progress-heading" className="text-lg font-semibold">Postęp importu</h2>
             <span className="flex items-center gap-2 text-xs text-gray-400"><span className={`h-1.5 w-1.5 rounded-full ${busy ? "bg-emerald-400 motion-safe:animate-pulse" : "bg-gray-500"}`}/>{busy ? "Aktualizowany na żywo" : "Twoja ostatnia aktywność"}</span>
           </div>
-          {progressError && <p role="alert" className="mb-4 rounded-xl border border-amber-300/20 bg-amber-400/10 p-4 text-sm text-amber-200">{progressError}</p>}
+          {progressError && <p role="alert" className="mb-4 whitespace-pre-wrap break-words rounded-xl border border-rose-300/30 bg-rose-400/10 p-4 text-sm text-rose-200">{progressError}</p>}
           {!statusReady && !progressError && <p role="status" className="rounded-2xl border border-gray-600 bg-gray-800/50 p-8 text-center text-sm text-gray-400">Odczytywanie stanu importu…</p>}
           {(statusReady || job) && <ImportProgress job={job}/>}
         </section>

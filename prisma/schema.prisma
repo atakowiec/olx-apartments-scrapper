@@ -36,6 +36,11 @@ model details {
   @@index([status, viewingScheduled, messageSent, id])
 }
 
+model ImportState {
+  id Int @id
+  snapshot String
+}
+
 model User {
   id String @id @default(cuid())
   username String @unique

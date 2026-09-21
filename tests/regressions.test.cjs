@@ -39,6 +39,14 @@ function reviewDatabase(rows) {
 }
 const searchUrl = 'https://www.olx.pl/nieruchomosci/mieszkania/wynajem/lublin/';
 
+function importDatabase() {
+  let row = null;
+  return {importState: {
+    findUnique: async () => row,
+    upsert: async ({create, update}) => {row = row ? {...row, ...update} : {...create}; return row;},
+  }};
+}
+
 test('Otodom URLs can be stored but never fetched by the scraper', () => {
   const {parseListingUrl, parseImportUrl, isAllowedScraperRequest} = load('src/util/importUrl.ts');
   const canonical = 'https://www.otodom.pl/pl/oferta/studio-ID123';
@@ -257,6 +265,7 @@ test('successful retry stops retrying the current page', async () => {
 test('import endpoint validates input before starting work', async () => {
   const imports = [];
   const {POST} = load('src/app/api/apartments/import/route.ts', {...common,
+    '@/util/prisma.ts': importDatabase(),
     '@/services/apartmentsService.ts': {handleImportUrl: async url => {imports.push(url);}}
   });
   for (const body of ['{', '{}', 'null', JSON.stringify({url: 'http://localhost/'})]) {
@@ -343,6 +352,9 @@ test('scraper progress counts retries, existing listings, saved listings and ski
   assert.equal(last.apartmentsProcessed, 2);
   assert.equal(last.saved, 1);
   assert.equal(last.apartmentsFailed, 1);
+  assert.equal(last.lastError.message, 'Unavailable listing');
+  assert.equal(last.lastError.url, broken);
+  assert.equal(last.lastError.attempt, 5);
   assert.equal(saved.length, 1);
   assert.ok(snapshots.some(value => value.phase === 'search' && value.attempt === 5));
   assert.ok(snapshots.some(value => value.phase === 'details' && value.attempt === 5));
@@ -353,6 +365,7 @@ test('jobs expose live progress, reject overlapping imports, finish and allow an
   let report;
   let runs = 0;
   const jobs = load('src/services/importJobs.ts', {...common,
+    '@/util/prisma.ts': importDatabase(),
     '@/services/apartmentsService.ts': {handleImportUrl: (url, callback) => {
       runs++;
       report = callback;
@@ -365,7 +378,7 @@ test('jobs expose live progress, reject overlapping imports, finish and allow an
   const first = await POST(request());
   assert.equal(first.status, 202);
   const id = (await first.json()).job.id;
-  report({phase: 'search', pagesTotal: 4, pagesProcessed: 2});
+  await report({phase: 'search', pagesTotal: 4, pagesProcessed: 2});
   const response = await GET();
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal((await response.json()).job.pagesProcessed, 2);
@@ -375,9 +388,9 @@ test('jobs expose live progress, reject overlapping imports, finish and allow an
   assert.equal(runs, 1);
   finish();
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(jobs.getImportJob().status, 'completed');
-  assert.ok(jobs.getImportJob().finishedAt);
-  const next = jobs.startImport(searchUrl);
+  assert.equal((await jobs.getImportJob()).status, 'completed');
+  assert.ok((await jobs.getImportJob()).finishedAt);
+  const next = await jobs.startImport(searchUrl);
   assert.equal(next.started, true);
   assert.notEqual(next.job.id, id);
   assert.equal(next.job.pagesProcessed, 0);
@@ -385,21 +398,92 @@ test('jobs expose live progress, reject overlapping imports, finish and allow an
 });
 
 test('fatal import errors retain partial progress and release the import lock', async () => {
+  const database = importDatabase();
   const jobs = load('src/services/importJobs.ts', {...common,
+    '@/util/prisma.ts': database,
     '@/services/apartmentsService.ts': {handleImportUrl: async (url, report) => {
-      report({saved: 2});
-      throw new Error('Database failure with private details');
+      await report({saved: 2});
+      throw new Error('SQLITE_BUSY: database is locked');
     }}
   });
-  jobs.startImport(searchUrl);
+  await jobs.startImport(searchUrl);
   await new Promise(resolve => setImmediate(resolve));
-  const failed = jobs.getImportJob();
+  const failed = await jobs.getImportJob();
   assert.equal(failed.status, 'failed');
   assert.equal(failed.saved, 2);
   assert.ok(failed.finishedAt);
   assert.ok(failed.error);
-  assert.ok(!failed.error.includes('private details'));
-  assert.equal(jobs.startImport(searchUrl).started, true);
+  assert.equal(failed.error, 'SQLITE_BUSY: database is locked');
+  const restored = load('src/services/importJobs.ts', {...common, '@/util/prisma.ts': database});
+  assert.deepEqual(JSON.parse(JSON.stringify(await restored.getImportJob())), JSON.parse(JSON.stringify(failed)));
+  assert.equal((await jobs.startImport(searchUrl)).started, true);
+});
+
+test('restart restores an interrupted snapshot and permits another import without losing its counters', async () => {
+  const database = importDatabase();
+  const {initialImportProgress} = load('src/types/importProgress.ts');
+  const snapshot = {...initialImportProgress, id: 'interrupted', url: searchUrl, status: 'running', phase: 'details',
+    saved: 7, apartmentsProcessed: 9, apartmentsTotal: 15, error: null, startedAt: '2026-09-21T12:00:00Z', finishedAt: null};
+  await database.importState.upsert({create: {id: 1, snapshot: JSON.stringify(snapshot)}});
+  let runs = 0;
+  const jobs = load('src/services/importJobs.ts', {...common, '@/util/prisma.ts': database,
+    '@/services/apartmentsService.ts': {handleImportUrl: async () => {runs++;}}});
+  const [first, second] = await Promise.all([jobs.getImportJob(), jobs.getImportJob()]);
+  assert.equal(first.status, 'failed');
+  assert.equal(first.saved, 7);
+  assert.equal(second.apartmentsProcessed, 9);
+  assert.ok(first.error.includes('restart'));
+  assert.ok(first.finishedAt);
+  assert.equal(runs, 0);
+  const restarted = await jobs.startImport(searchUrl);
+  assert.equal(restarted.started, true);
+  assert.equal(restarted.job.saved, 0);
+  assert.equal(runs, 1);
+});
+
+test('concurrent starts share one scraper and persistence failures leave the previous result intact', async () => {
+  const database = importDatabase();
+  let runs = 0;
+  const jobs = load('src/services/importJobs.ts', {...common, '@/util/prisma.ts': database,
+    '@/services/apartmentsService.ts': {handleImportUrl: () => {runs++; return new Promise(() => {});}}});
+  const [a, b] = await Promise.all([jobs.startImport(searchUrl), jobs.startImport(searchUrl)]);
+  assert.equal(Number(a.started) + Number(b.started), 1);
+  assert.equal(a.job.id, b.job.id);
+  assert.equal(runs, 1);
+
+  const previous = {...a.job, status: 'completed', saved: 10, finishedAt: '2026-09-21T12:00:00Z'};
+  const broken = load('src/services/importJobs.ts', {...common,
+    '@/util/prisma.ts': {importState: {findUnique: async () => ({snapshot: JSON.stringify(previous)}),
+      upsert: async () => {throw new Error('SQLITE_FULL: database or disk is full');}}},
+    '@/services/apartmentsService.ts': {handleImportUrl: () => {throw new Error('Must not start');}}});
+  await assert.rejects(broken.startImport(searchUrl), /SQLITE_FULL/);
+  assert.equal((await broken.getImportJob()).saved, 10);
+  assert.equal((await broken.getImportJob()).status, 'completed');
+});
+
+test('import API returns exact storage errors and request errors preserve JSON, text and network details', async () => {
+  const {GET, POST} = load('src/app/api/apartments/import/route.ts', {...common,
+    '@/services/importJobs.ts': {getImportJob: async () => {throw new Error('SQLITE_BUSY: database is locked');},
+      startImport: async () => {throw new Error('SQLITE_FULL: database or disk is full');}}});
+  const read = await GET();
+  assert.equal(read.status, 500);
+  assert.equal((await read.json()).error, 'SQLITE_BUSY: database is locked');
+  const write = await POST(new Request('http://app/api', {method: 'POST', body: JSON.stringify({url: searchUrl})}));
+  assert.equal(write.status, 500);
+  assert.equal((await write.json()).error, 'SQLITE_FULL: database or disk is full');
+  const {requestErrorMessage} = load('src/util/errorMessage.ts');
+  assert.equal(requestErrorMessage({response: {status: 403, data: {error: 'Administrator access required'}}}), 'HTTP 403\nAdministrator access required');
+  assert.equal(requestErrorMessage({response: {status: 502, statusText: 'Bad Gateway', data: '<h1>nginx upstream unavailable</h1>'}}), 'HTTP 502 Bad Gateway\n<h1>nginx upstream unavailable</h1>');
+  assert.equal(requestErrorMessage(new Error('Network Error')), 'Network Error');
+});
+
+test('scraper reports HTTP failures before waiting for selectors', async () => {
+  const {loadPage} = load('src/util/puppeteer.ts', {
+    puppeteer: {launch: async () => ({newPage: async () => ({setRequestInterception: async () => {}, on() {},
+      goto: async () => ({status: () => 403, statusText: () => 'Forbidden', url: () => searchUrl}),
+      waitForSelector: async () => {throw new Error('Should not wait for a selector on an HTTP error page');}})})},
+  });
+  await assert.rejects(loadPage(searchUrl, '.price'), /HTTP 403 Forbidden/);
 });
 
 test('progress view renders idle, discovery, active, warning and failure states', () => {
@@ -412,6 +496,12 @@ test('progress view renders idle, discovery, active, warning and failure states'
   const active = render({...job, phase: 'search', pagesTotal: 5, pagesProcessed: 2, attempt: 3});
   assert.ok(active.includes('max="5" value="2"'));
   assert.ok(active.includes('Ponowna próba: 3 / 5'));
+  const ended = {...job, phase: 'details', apartmentsTotal: 8, apartmentsProcessed: 3,
+    status: 'failed', error: 'net::ERR_CONNECTION_RESET', finishedAt: '2026-09-21T12:00:00.000Z'};
+  assert.ok(render(ended).includes('max="8" value="3"'));
+  assert.ok(render(ended).includes('net::ERR_CONNECTION_RESET'));
+  assert.ok(render(ended).includes('Zakończono:'));
+  assert.ok(render({...ended, status: 'completed', apartmentsProcessed: 8, error: null}).includes('max="8" value="8"'));
   assert.ok(render({...job, status: 'completed', pagesFailed: 1}).includes('z błędami'));
   assert.ok(render({...job, status: 'completed', saved: 0}).includes('Import zakończony'));
   assert.ok(render({...job, status: 'failed', error: 'Test error'}).includes('role="alert"'));
@@ -422,7 +512,7 @@ test('import page restores an active job, retries polling failures and displays 
   const active = {...initialImportProgress, id: 'restored', url: searchUrl, status: 'running',
     phase: 'details', apartmentsTotal: 3, apartmentsProcessed: 1, saved: 1, error: null};
   const replies = [{data: {job: active}}, new Error('Offline'),
-    {data: {job: {...active, status: 'completed', apartmentsProcessed: 3, saved: 3}}}];
+    {data: {job: {...active, status: 'completed', apartmentsProcessed: 3, saved: 3}}}, {data: {job: null}}];
   const state = [];
   const refs = [];
   let stateIndex = 0;
@@ -457,11 +547,16 @@ test('import page restores an active job, retries polling failures and displays 
   assert.ok(render().includes('max="3" value="1"'));
   await nextPoll();
   assert.ok(render().includes('Ponawiam połączenie'));
+  assert.ok(render().includes('Offline'));
+  assert.ok(render().includes('max="3" value="1"'));
   await nextPoll();
   const complete = render();
   assert.ok(complete.includes('Import zakończony'));
   assert.ok(!complete.includes('Ponawiam połączenie'));
   assert.ok(complete.includes('Przejrzyj mieszkania'));
+  assert.ok(complete.includes('max="3" value="3"'));
+  await nextPoll();
+  assert.ok(render().includes('Import zakończony'));
   cleanup();
   assert.equal(lastSignal.aborted, true);
   assert.equal(nextPoll, undefined);

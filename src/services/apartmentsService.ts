@@ -6,6 +6,7 @@ import {parseImportUrl, parseOlxUrl, parseListingUrl} from "@/util/importUrl.ts"
 import {readSearchCards, searchCardPrice, type SearchCard} from "@/util/searchCards.ts";
 import {initialImportProgress, type ImportProgress} from "@/types/importProgress.ts";
 import {extractSurfaceArea} from "@/types/apartment.ts";
+import {errorMessage} from "@/util/errorMessage.ts";
 
 const logger = loggerFactory("import");
 
@@ -21,20 +22,20 @@ export type DetailsType = {
   surfaceArea?: number | null;
 }
 
-export async function handleImportUrl(url: string, onProgress: (progress: ImportProgress) => void = () => {}) {
+export async function handleImportUrl(url: string, onProgress: (progress: ImportProgress) => void | Promise<void> = () => {}) {
   const progress = {...initialImportProgress};
-  const report = (update: Partial<ImportProgress>) => {
+  const report = async (update: Partial<ImportProgress>) => {
     Object.assign(progress, update);
-    onProgress({...progress});
+    await onProgress({...progress});
   };
-  report({phase: "discovery"});
+  await report({phase: "discovery"});
   const urlObject = parseImportUrl(url);
   urlObject.searchParams.set("page", "1");
 
   logger.info(`Importing data from ${urlObject.toString()}`);
   const lastPage = await findLastPage(urlObject.toString());
   logger.info(`Found ${lastPage} pages, starting import...`);
-  report({phase: "search", pagesTotal: lastPage});
+  await report({phase: "search", pagesTotal: lastPage});
 
   const urls = await findUrlsFromSearchPages(urlObject, lastPage, report);
 
@@ -42,7 +43,7 @@ export async function handleImportUrl(url: string, onProgress: (progress: Import
 
   const newUrls = Array.from(urls.keys()).filter((url) => inDatabase.every((dbUrl) => dbUrl.url !== url));
   logger.info(`Found ${urls.size} distinct urls, ${newUrls.length} are new`);
-  report({phase: "details", apartmentsTotal: newUrls.length, existing: urls.size - newUrls.length, attempt: 0});
+  await report({phase: "details", apartmentsTotal: newUrls.length, existing: urls.size - newUrls.length, attempt: 0});
 
   for (const url of newUrls) {
     const card = urls.get(url)!;
@@ -50,25 +51,25 @@ export async function handleImportUrl(url: string, onProgress: (progress: Import
       url, source: "otodom", title: card.title || "Ogłoszenie Otodom", description: card.description,
       images: card.images, price: searchCardPrice(card.priceText), rent: null,
       surfaceArea: extractSurfaceArea(card.surfaceText), loaded: false,
-    } : await handleSingleDetailsPage(url, attempt => report({attempt}));
+    } : await handleSingleDetailsPage(url, report);
     if (details === undefined) {
-      report({apartmentsFailed: progress.apartmentsFailed + 1});
+      await report({apartmentsFailed: progress.apartmentsFailed + 1});
     } else {
       await prisma.details.create({data: details});
-      report({saved: progress.saved + 1});
+      await report({saved: progress.saved + 1});
       logger.info(`Saved details from ${details.url} - ${details.title}`);
     }
-    report({apartmentsProcessed: progress.apartmentsProcessed + 1, attempt: 0});
+    await report({apartmentsProcessed: progress.apartmentsProcessed + 1, attempt: 0});
   }
 }
 
-async function findUrlsFromSearchPages(urlObject: URL, lastPage: number, report: (update: Partial<ImportProgress>) => void) {
+async function findUrlsFromSearchPages(urlObject: URL, lastPage: number, report: (update: Partial<ImportProgress>) => Promise<void>) {
   const urls = new Map<string, SearchCard>();
   let pagesFailed = 0;
 
   for (let i = 1; i <= lastPage; i++) {
     for (let attempt = 1; attempt <= 5; attempt++) {
-      report({attempt});
+      await report({attempt});
       try {
         urlObject.searchParams.set("page", i.toString());
         logger.info(`Importing page ${i} (${urlObject.toString()})`);
@@ -85,6 +86,7 @@ async function findUrlsFromSearchPages(urlObject: URL, lastPage: number, report:
         }
         break;
       } catch (e) {
+        await report({lastError: {message: errorMessage(e), url: urlObject.toString(), attempt}});
         logger.error(`Failed to import page ${i}, attempt ${attempt}/5`, e);
         if (attempt === 5) {
           pagesFailed++;
@@ -92,7 +94,7 @@ async function findUrlsFromSearchPages(urlObject: URL, lastPage: number, report:
         }
       }
     }
-    report({pagesProcessed: i, pagesFailed, urlsFound: urls.size, attempt: 0});
+    await report({pagesProcessed: i, pagesFailed, urlsFound: urls.size, attempt: 0});
   }
 
   return urls
@@ -119,7 +121,7 @@ async function readSearchPage(page: Page): Promise<SearchCard[]> {
   return await page.evaluate(readSearchCards, requiredSelector("SEARCH_URL_SELECTOR"));
 }
 
-async function handleSingleDetailsPage(url: string, onAttempt: (attempt: number) => void): Promise<DetailsType | undefined> {
+async function handleSingleDetailsPage(url: string, report: (update: Partial<ImportProgress>) => Promise<void>): Promise<DetailsType | undefined> {
   if (!validateAndFixURL(url)) {
     logger.warn(`Skipping url ${url}, not from olx.pl`)
     return undefined;
@@ -127,10 +129,11 @@ async function handleSingleDetailsPage(url: string, onAttempt: (attempt: number)
 
   let tries = 5;
   while (tries-- > 0) {
-    onAttempt(5 - tries);
+    await report({attempt: 5 - tries});
     try {
       return await readSingleDetailsPage(url);
     } catch (e) {
+      await report({lastError: {message: errorMessage(e), url, attempt: 5 - tries}});
       if (tries == 0) {
         logger.error(`Failed to import details from ${url} 5 times, skipping to next url`);
       } else {

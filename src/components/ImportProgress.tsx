@@ -36,12 +36,13 @@ export default function ImportProgress({job}: {job: ImportJob | null}) {
           </li>;
         })}
       </ol>
-    {job.status === "running" && <>
-      {job.phase === "discovery" ? <progress className="h-2 w-full overflow-hidden rounded-full accent-emerald-400" aria-label={title}/> :
+    <>
+      {job.phase === "discovery" && job.status === "running" ? <progress className="h-2 w-full overflow-hidden rounded-full accent-emerald-400" aria-label={title}/> :
         <><div className="mb-2 flex justify-between text-xs text-gray-400"><p>{searching ? "Strony" : "Mieszkania"}: {processed} / {total}</p><span className="font-semibold text-emerald-300">{percent}%</span></div>
           <progress className="block h-2 w-full overflow-hidden rounded-full accent-emerald-400 [&::-webkit-progress-bar]:bg-gray-700 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-emerald-400 [&::-moz-progress-bar]:bg-emerald-400" aria-label={title} max={Math.max(total, 1)} value={processed}/></>}
-      {job.attempt > 1 && <p className="mt-3 text-xs text-amber-300">Ponowna próba: {job.attempt} / 5</p>}
-    </>}
+      {job.status === "running" && job.attempt > 1 && <p className="mt-3 text-xs text-amber-300">Ponowna próba: {job.attempt} / 5</p>}
+    </>
+    {job.finishedAt && <p className="mt-3 text-xs text-gray-400">Zakończono: <time dateTime={job.finishedAt}>{new Date(job.finishedAt).toLocaleString("pl-PL", {timeZone: "Europe/Warsaw"})}</time>. Ostatni wynik pozostaje widoczny do rozpoczęcia kolejnego importu.</p>}
     <dl className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
       {[{label: "Znalezione ogłoszenia", value: job.urlsFound}, {label: "Już w bazie", value: job.existing}, {label: "Zapisane mieszkania", value: job.saved, highlight: true}, {label: "Pominięte (błędy)", value: warnings}].map(({label, value, highlight}) =>
         <div key={label} className={`rounded-xl border p-4 ${highlight ? "border-emerald-300/20 bg-emerald-400/5" : "border-gray-700 bg-gray-900/30"}`}><dt className="text-xs leading-5 text-gray-400">{label}</dt><dd className={`mt-2 text-2xl font-semibold tabular-nums ${highlight ? "text-emerald-300" : "text-gray-100"}`}>{value}</dd></div>)}
@@ -51,7 +52,12 @@ export default function ImportProgress({job}: {job: ImportJob | null}) {
       <div className="flex justify-between gap-4"><dt>Sprawdzone nowe mieszkania</dt><dd className="tabular-nums text-gray-300">{job.apartmentsProcessed} / {job.apartmentsTotal}</dd></div>
       {warnings > 0 && <><div className="flex justify-between gap-4"><dt>Pominięte strony (błędy)</dt><dd className="text-amber-300">{job.pagesFailed}</dd></div><div className="flex justify-between gap-4"><dt>Pominięte mieszkania (błędy)</dt><dd className="text-amber-300">{job.apartmentsFailed}</dd></div></>}
     </dl>
-    {job.error && <p role="alert" className="mt-5 rounded-xl border border-rose-300/20 bg-rose-400/10 p-4 text-sm text-rose-300">{job.error}</p>}
+    {job.error && <p role="alert" className="mt-5 whitespace-pre-wrap break-words rounded-xl border border-rose-300/20 bg-rose-400/10 p-4 text-sm text-rose-300">{job.error}</p>}
+    {job.lastError && <div role="alert" className="mt-5 rounded-xl border border-amber-300/20 bg-amber-400/10 p-4 text-sm text-amber-200">
+      <p className="font-medium">Ostatni błąd pobierania · próba {job.lastError.attempt} / 5</p>
+      <p className="mt-2 whitespace-pre-wrap break-words">{job.lastError.message}</p>
+      <p className="mt-2 break-all text-xs">{job.lastError.url}</p>
+    </div>}
     </div>
     {job.status === "completed" && job.saved > 0 &&
       <div className="flex flex-wrap items-center justify-between gap-4 border-t border-gray-700 bg-gray-900/20 px-5 py-4 sm:px-7"><p className="text-sm text-gray-300">Nowe oferty czekają na Twoją decyzję.</p><Link href="/" className="inline-flex items-center gap-2 rounded-xl bg-emerald-400 px-4 py-2.5 text-sm font-semibold text-gray-950 transition hover:bg-emerald-300">Przejrzyj mieszkania<ArrowRightIcon className="h-4 w-4" aria-hidden="true"/></Link></div>}

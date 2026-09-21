@@ -2,6 +2,7 @@ import {NextResponse} from "next/server";
 import {getImportJob, startImport} from "@/services/importJobs.ts";
 import {parseImportUrl} from "@/util/importUrl.ts";
 import {requireAdmin} from "@/util/requireAdmin.ts";
+import {errorMessage} from "@/util/errorMessage.ts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -9,7 +10,11 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   const denied = await requireAdmin(request);
   if (denied) return denied;
-  return NextResponse.json({job: getImportJob()}, {headers: {"Cache-Control": "no-store"}});
+  try {
+    return NextResponse.json({job: await getImportJob()}, {headers: {"Cache-Control": "no-store"}});
+  } catch (error) {
+    return NextResponse.json({error: errorMessage(error)}, {status: 500, headers: {"Cache-Control": "no-store"}});
+  }
 }
 
 export async function POST(req: Request) {
@@ -19,10 +24,14 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     url = parseImportUrl(body?.url).toString();
-  } catch {
-    return NextResponse.json({error: "Provide a valid HTTPS OLX apartment search URL"}, {status: 400});
+  } catch (error) {
+    return NextResponse.json({error: errorMessage(error)}, {status: 400});
   }
 
-  const {started, job} = startImport(url);
-  return NextResponse.json({job}, {status: started ? 202 : 409});
+  try {
+    const {started, job} = await startImport(url);
+    return NextResponse.json({job}, {status: started ? 202 : 409});
+  } catch (error) {
+    return NextResponse.json({error: errorMessage(error)}, {status: 500});
+  }
 }
